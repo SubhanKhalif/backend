@@ -240,10 +240,10 @@ app.get("/", (req, res) => {
     res.send("API is running!");
 });
 
-// सर्वर को 5000 पोर्ट पर शुरू करें
-const PORT = 5000;
+// Set the server to listen on the port defined by Vercel or fallback to 5000
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`सर्वर ${PORT} पोर्ट पर चल रहा है`);
+    console.log(`Server is running on port ${PORT}`);
 });
 
 // Export app for Vercel
