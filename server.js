@@ -37,10 +37,6 @@ mongoose.connect(process.env.MONGO_URI, {
       process.exit(1); // कनेक्शन फेल होने पर बंद करें
   });
 
-app.get('/protected-route', isAuthenticated, (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/protected-file.html'));
-});
-
 let activeCollection = "defaultCollection";
 
 // Metadata schema for sheets
@@ -166,13 +162,13 @@ app.delete("/api/deleteSheet", async (req, res) => {
 });
 
 // Signup route
-app.post('/signup', async (req, res) => {
+app.post('/api/signup', async (req, res) => {
     const { username, password } = req.body;
 
     // यूजर पहले से मौजूद है या नहीं चेक करें
     const existingUser = await User.findOne({ username });
     if (existingUser) {
-        return res.status(400).send('यूजर पहले से मौजूद है');
+        return res.status(400).json({ success: false, message: 'यूजर पहले से मौजूद है' });
     }
 
     // पासवर्ड को हैश करें
@@ -181,11 +177,11 @@ app.post('/signup', async (req, res) => {
     // हैश किए गए पासवर्ड के साथ नया यूजर बनाएं
     const newUser = new User({ username, password: hashedPassword });
     await newUser.save();
-    res.status(201).send('यूजर बनाया गया');
+    res.status(201).json({ success: true, message: 'यूजर बनाया गया' });
 });
 
 // Login route
-app.post('/login', async (req, res) => {
+app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     const user = await User.findOne({ username });
     if (user) {
@@ -193,7 +189,7 @@ app.post('/login', async (req, res) => {
         if (isMatch) {
             req.session.user = user; // Set the session
             console.log('User session set:', req.session.user); // Log session
-            res.redirect('/index'); // Redirect to index.html
+            res.json({ success: true, message: 'Login successful' });
         } else {
             res.status(401).json({ success: false, message: 'Invalid credentials' });
         }
@@ -203,47 +199,13 @@ app.post('/login', async (req, res) => {
 });
 
 // Protect the index route with authentication
-app.get('/index', (req, res) => {
+app.get('/index', isAuthenticated, (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/index.html'));
-});
-
-app.get('/api/getTable', (req, res) => {
-    try {
-        const table = TableModel.findOne({ collectionName: activeCollection });
-
-        if (!table) {
-            return res.json({ metadata: { rows: 5, columns: 5 }, data: [] });
-        }
-
-        res.json({ metadata: { rows: table.rows, columns: table.columns }, data: table.data });
-    } catch (error) {
-        res.status(500).json({ error: "Error fetching table data" });
-    }
-});
-
-app.post('/api/saveTable', (req, res) => {
-    const { rows, columns, data } = req.body;
-    try {
-        TableModel.findOneAndUpdate(
-            { collectionName: activeCollection },
-            { rows, columns, data },
-            { upsert: true }
-        );
-        res.json({ message: "Table data saved successfully" });
-    } catch (error) {
-        res.status(500).json({ error: "Error saving table data" });
-    }
 });
 
 // Default route
 app.get("/", (req, res) => {
     res.send("API is running!");
-});
-
-// Set the server to listen on the port defined by Vercel or fallback to 5000
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
 });
 
 // Export app for Vercel
