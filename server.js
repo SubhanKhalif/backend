@@ -4,8 +4,7 @@ const cors = require("cors");
 require("dotenv").config();
 const bcrypt = require("bcrypt");
 const path = require("path");
-const session = require("express-session");
-const isAuthenticated = require("./middleware/isAuthenticated");
+const jwt = require("jsonwebtoken");
 const User = require("./models/userModel");
 const Metadata = require("./models/tableMetadataModel");
 const TableModel = require("./models/sheetDataModel");
@@ -14,26 +13,36 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Session Management
-app.use(session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: true,
-    cookie: { secure: false }
-}));
-
 // MongoDB Connection
-mongoose.connect(process.env.MONGO_URI, {
-    serverSelectionTimeoutMS: 5000
-}).then(() => console.log("MongoDB Connected"))
-  .catch(err => {
-      console.error("MongoDB Connection Error:", err);
-      process.exit(1);
-  });
+let isConnected = false;
+async function connectDB() {
+    if (isConnected) return;
+    await mongoose.connect(process.env.MONGO_URI, {
+        serverSelectionTimeoutMS: 5000
+    });
+    isConnected = true;
+    console.log("MongoDB Connected");
+}
 
-let activeCollection = "defaultCollection";
+// JWT Secret
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// Middleware to authenticate user using JWT
+const isAuthenticated = (req, res, next) => {
+    const token = req.headers.authorization;
+    if (!token) return res.status(403).json({ message: "Access denied" });
+
+    try {
+        const decoded = jwt.verify(token.split(" ")[1], JWT_SECRET);
+        req.user = decoded;
+        next();
+    } catch (error) {
+        res.status(403).json({ message: "Invalid token" });
+    }
+};
 
 // Set Active Collection
+let activeCollection = "defaultCollection";
 app.post("/api/setCollection", (req, res) => {
     activeCollection = req.body.collection;
     res.json({ message: `Active collection set to ${activeCollection}` });
@@ -41,6 +50,7 @@ app.post("/api/setCollection", (req, res) => {
 
 // Add New Sheet
 app.post("/api/addSheet", async (req, res) => {
+    await connectDB();
     const { sheetName } = req.body;
     if (!sheetName) return res.status(400).json({ success: false, message: "Sheet name required!" });
 
@@ -62,6 +72,7 @@ app.post("/api/addSheet", async (req, res) => {
 
 // Get Sheets
 app.get("/api/getSheets", async (req, res) => {
+    await connectDB();
     try {
         let metadata = await Metadata.findOne();
         res.json({ sheets: metadata ? metadata.sheetNames : [] });
@@ -72,6 +83,7 @@ app.get("/api/getSheets", async (req, res) => {
 
 // Get Table Data
 app.get("/api/getTable", async (req, res) => {
+    await connectDB();
     try {
         const table = await TableModel.findOne({ collectionName: activeCollection });
         if (!table) return res.json({ metadata: { rows: 5, columns: 5 }, data: [] });
@@ -83,6 +95,7 @@ app.get("/api/getTable", async (req, res) => {
 
 // Save Table Data
 app.post("/api/saveTable", async (req, res) => {
+    await connectDB();
     const { rows, columns, data } = req.body;
     try {
         await TableModel.findOneAndUpdate(
@@ -98,6 +111,7 @@ app.post("/api/saveTable", async (req, res) => {
 
 // Delete Sheet
 app.delete("/api/deleteSheet", async (req, res) => {
+    await connectDB();
     const { sheetName } = req.body;
     if (!sheetName) return res.status(400).json({ success: false, message: "Sheet name required!" });
 
@@ -121,6 +135,7 @@ app.delete("/api/deleteSheet", async (req, res) => {
 
 // User Signup
 app.post('/api/signup', async (req, res) => {
+    await connectDB();
     const { username, password } = req.body;
     const existingUser = await User.findOne({ username });
     if (existingUser) return res.status(400).json({ success: false, message: 'User already exists' });
@@ -131,26 +146,17 @@ app.post('/api/signup', async (req, res) => {
     res.status(201).json({ success: true, message: 'User created' });
 });
 
-// User Login
+// User Login (JWT)
 app.post('/api/login', async (req, res) => {
+    await connectDB();
     const { username, password } = req.body;
     const user = await User.findOne({ username });
     if (user && await bcrypt.compare(password, user.password)) {
-        req.session.user = user;
-        res.json({ success: true, message: 'Login successful' });
+        const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+        res.json({ success: true, token });
     } else {
         res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
-});
-
-// Protected Route
-app.get('/index', isAuthenticated, (req, res) => {
-    res.sendFile(path.join(__dirname, '../index.html'));
-});
-
-// Default Route
-app.get("/", (req, res) => {
-    res.send("API is running!");
 });
 
 // Export app for Vercel
